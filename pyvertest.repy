@@ -1,0 +1,60 @@
+"""
+pyvertest.repy -- Find platform info on Seattle vessels through Repy.
+"""
+
+def pretending_callback(*args):
+  sleep(10)
+
+
+
+
+if callfunc=="initialize":
+  logstring = getmyip() + " runs "
+
+  # Python version test, see #1121 and #1127 (problem descriptions), and
+  # http://docs.python.org/2/whatsnew/2.7.html#pep-378-format-specifier-for-thousands-separator
+  # (inspiration for the detection)
+  try:
+    '{:20,d}'.format(18446744073709551616)
+    logstring += "Python 2.7 "
+  except AttributeError:
+    logstring += "Python 2.5 "
+  except ValueError:
+    logstring += "Python 2.6 "
+
+
+  # OS test, inspired by some semi-related discussion with Akos Lukovics
+  sockethandle = waitforconn("localhost", 63107, pretending_callback)
+  for i in range(0,2):
+    try:
+      openconn("localhost", 63107, "localhost", 63107)
+    except Exception, e:
+      (exception_number, exception_string) = e.args
+      os_from_errno = {10048: 'Windows', 98: 'Linux', 48: 'MacOSX'}
+      logstring += "on " + os_from_errno[exception_number] + " "
+      break
+
+
+
+  # File system test, see #1149
+  file = open("CaseSensitive", mode="w")
+  file.write("Let's write a few bytes...")
+  file.flush()
+  file.close()
+
+  try:
+    removefile("cASEsENSITIVE")
+    logstring += "on a non-case preserving file system.\n"
+  except Exception, e:
+    logstring += "on a case preserving file system.\n"
+
+
+
+  # Log the test results
+  print logstring
+  file = open("log.txt", mode="w")
+  file.write(logstring)
+  file.flush()
+  file.close()
+
+  exitall()
