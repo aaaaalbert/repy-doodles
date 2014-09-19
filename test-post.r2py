@@ -1,0 +1,8 @@
+httpretrieve = dy_import_module("httpretrieve.r2py")
+
+url = callargs[0]
+stuff_to_post = str(callargs[1:])
+
+log("Opening url '" + url + "' to post '" + str(stuff_to_post) + "' there...\n")
+log(httpretrieve.httpretrieve_open(url, postdata=stuff_to_post), "\n")
+
