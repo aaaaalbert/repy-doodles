@@ -1,0 +1,8 @@
+./*
+DEPENDENCIES/repy_v2/*
+DEPENDENCIES/seattlelib_v2/*
+DEPENDENCIES/portability/*
+DEPENDENCIES/common/*
+
+# There are no tests at the moment -- what a shame!
+
