@@ -13,14 +13,16 @@ class MyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
           if ctype == 'application/x-www-form-urlencoded':
               length = int(self.headers.getheader('content-length'))
               postvars = cgi.parse_qs(self.rfile.read(length), keep_blank_values=1)
+              print "Client posted", postvars
 
           self.send_response(200)
+          """
           self.send_header("Content-type", "text")
-          self.send_header("Content-length", str(len(body)))
+          self.send_header("Content-length", str(len(body))) """
           self.end_headers()
-          self.wfile.write(body)
-        except:
-          print "Error"
+          # self.wfile.write(body)
+        except Exception, e:
+          print "Error", repr(e)
 
 
 def httpd(handler_class=MyHandler, server_address = ('127.0.0.1', 8000)):
