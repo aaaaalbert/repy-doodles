@@ -15,7 +15,8 @@ advertise = dy_import_module("advertise.r2py")
 
 for identifier in sys.argv[1:]:
   try:
-    print "'" + identifier + "' maps to", advertise.advertise_lookup(identifier)
+    resultslist = advertise.advertise_lookup(identifier)
+    print "'" + identifier + "' maps to", len(resultslist), "value(s):", resultslist 
   except advertise.AdvertiseError:
     print "(Error looking up " + identifier +")"
 
