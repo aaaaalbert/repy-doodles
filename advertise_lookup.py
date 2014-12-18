@@ -2,10 +2,10 @@ import sys
 
 if len(sys.argv) == 1:
   print """advertise_lookup.py -- 
-  resolve a key to a value on the Seattle advertise services
+  resolve keys to values on the Seattle advertise services
 
 Usage:
-  python advertise_lookup.py ONE_ID [ ANOTHER_ID... ]
+  python advertise_lookup.py ONE_ID [ FURTHER_IDs... ]
 """
 
 from repyportability import *
