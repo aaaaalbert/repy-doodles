@@ -9,6 +9,18 @@ it should be possible to achieve the same thing in a clean, dispatchable
 module, but I haven't figured out how, yet.)
 
 
+Usage: Like dylink.r2py
+  python repy.py restrictions.file dy_trace_imports.r2py your_program.r2py
+
+
+Example:
+  python repy.py restrictions.default dy_trace_imports.r2py advertise.r2py
+
+Output:
+advertise.r2py listops.r2py centralizedadvertise.r2py session.r2py sockettimeout.r2py random.r2py math.r2py serialize.r2py centralizedadvertise_v2.r2py parallelize.r2py uniqueid.r2py udpcentralizedadvertise.r2py
+
+
+
 Author: Armon Dadgar
 Description:
   This module is designed to help dynamically link against other modules,
