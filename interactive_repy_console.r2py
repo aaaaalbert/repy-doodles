@@ -89,3 +89,56 @@ to stop and then restart the VM.
 
 
 
+def create_server(remote_ip, remote_port, user_connection):
+  """This will return an argument-less function for `createthread`. 
+  The arguments given will be available to the function we return 
+  via a closure."""
+  def server():
+    log("Incoming client on", remote_ip, "port", remote_port, "\n")
+    # XXX Actually handle the client now!
+
+  return server
+
+
+
+if callfunc == "initialize":
+  # Initialize the listening socket, respecting the optional callarg.
+  try:
+    listen_port = int(callargs[0])
+  except ValueError:
+    # An arg was given, but it is not parseable as int.
+    log("""Usage: interactive_repy_console.r2py [LISTEN_PORT]
+where LISTEN_PORT is an optional port I should listen on. When omitted, 
+an available TCP port is chosen automatically, and announced in the VM log.
+""")
+    exitall()
+  except IndexError:
+    # No port arg was given. Try to find a port ourselves!
+    for listen_port in getresources()[0]["connport"]:
+      try:
+        listen_socket = listenforconnection(getmyip(), listen_port)
+        log("Listening on", getmyip(), "port", listen_port, "\n")
+        break
+      except (AlreadyListeningError, DuplicateTupleError, 
+          RepyArgumentError, ResourceForbiddenError, AddressBindingError):
+        # These are all indicative that we can't listen here. Keep trying!
+        pass
+    else:
+      # If we end up here, none of the ports worked. Quit!
+      quit("Sorry, none of the ports I tried would work. I'm giving up.\n")
+
+  # Down here, all is well. We have a listening socket for the user.
+  # Let's see when they connect in.
+  while True:
+    try:
+      (remote_ip, remote_port, user_connection) = listen_socket.getconnection()
+      server = create_server(remote_ip, remote_port, user_connection)
+      createthread(server)
+    except SocketWouldBlockError:
+      # No incoming connection this time. Check again later.
+      sleep(0.1)
+    except:
+      # We can't do anything sensible with other errors. Let's 
+      # have Repy print a stacktrace.
+      raise
+
