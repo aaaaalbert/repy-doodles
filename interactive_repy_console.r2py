@@ -17,15 +17,75 @@ You would run that on your local machine.)
 
 Usage:
 In seash,
-user@group !> start interactive_repy_console.r2py LISTENPORT
+user@group !> start dylink.r2py interactive_repy_console.r2py LISTENPORT
 
    or
-user@group !> start interactive_repy_console.r2py
+user@group !> start dylink.r2py interactive_repy_console.r2py
 
 Using the first form, Interactive Repy Console will try to bind to 
 LISTENPORT and use it to receive incoming connections. Using the 
 second form, it will choose a port automatically.
 Either way, the port is logged in the VM log so you know how to 
 contact it.
+
+You would then go and upload your own code using seash, and start it 
+inside Interactive Repy Console to see if it performs as expected. 
+When in doubt, call the help() function on the prompt.
 """
+
+# Override a few RepyV2 API calls
+real_exitall = exitall
+real_log = log
+
+def exitall():
+  pass
+
+
+def log(*args):
+  """Print the given arguments to the VM log. 
+  XXX In a later implementation, send them to the Telnet client too."""
+  string_to_print = ""
+  for arg in args:
+    string_to_print += str(arg) + " "
+  # XXX send_to_telnet_client_now(string_to_print)
+  # Print to the VM log
+  real_log(string_to_print)
+
+
+
+def quit(message="Quitting Interactive Repy Console (and any thread that "
+        "might be running still).\n"):
+  if message:
+    log(message)
+  real_exitall()
+
+
+
+def help():
+  """List and explain the handy functions we implement."""
+  log("""In addition to the RepyV2 API and all library calls you imported, 
+you may call these builtin functions during your session:
+
+help()      -- displays this text
+cat(file)   -- prints the contents of file to the screen (and the VM log)
+module = dy_import_module(modulefilename)
+            -- use this instead of Python's `import modulename as module`
+dy_import_module_symbols(modulefilename)
+            -- use this instead of Python's `from modulename import *`
+quit(message=...)
+            -- quits Interactive Repy Console and prints an overrideable message
+start(file) -- imports file and calls into `if callfunc=="initialize": ...`,
+               as seash's `start` command would do
+
+Note: The following Repy functions been overwritten by Interactive Repy Console:
+exitall()   -- will not perform any function
+log(*args)  -- will both print to the VM log and this network connection
+
+You can always get the original functions back, they are stored as "real_*". 
+In case anything goes wrong because your code hangs etc., just use seash 
+to stop and then restart the VM.
+
+""")
+
+
 
