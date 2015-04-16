@@ -1,0 +1,31 @@
+"""
+interactive_repy_console.r2py --- as the name says!
+
+Interactive Repy Console is meant to be uploaded to a Seattle VM and 
+run there. It will listen on a TCP port for an incoming connection 
+from your Telnet client, netcat, or similar, and then provide a 
+RepyV2 Read-Evaluate-Print Loop (REPL). 
+This eases experimentation, as it shortcuts `seash` for the most part: 
+You can work interactively, see the VM log as it is written to, get 
+immediate feedback if there are any errors in your code, etc. 
+All of Repy will work as expected; you might upload and then import 
+libraries as well; calling the `help()` function will list a few 
+other things it provides.
+
+(Note: There is a Python version of Interactive Repy Console too. 
+You would run that on your local machine.)
+
+Usage:
+In seash,
+user@group !> start interactive_repy_console.r2py LISTENPORT
+
+   or
+user@group !> start interactive_repy_console.r2py
+
+Using the first form, Interactive Repy Console will try to bind to 
+LISTENPORT and use it to receive incoming connections. Using the 
+second form, it will choose a port automatically.
+Either way, the port is logged in the VM log so you know how to 
+contact it.
+"""
+
