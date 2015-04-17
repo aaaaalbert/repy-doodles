@@ -49,7 +49,7 @@ def log(*args):
     string_to_print += str(arg) + " "
   # XXX send_to_telnet_client_now(string_to_print)
   # Print to the VM log
-  real_log(string_to_print)
+  real_log(string_to_print[:-1])
 
 
 
@@ -104,28 +104,32 @@ def create_server(remote_ip, remote_port, user_connection):
 if callfunc == "initialize":
   # Initialize the listening socket, respecting the optional callarg.
   try:
-    listen_port = int(callargs[0])
+    listen_port_list = [int(callargs[0])]
   except ValueError:
     # An arg was given, but it is not parseable as int.
-    log("""Usage: interactive_repy_console.r2py [LISTEN_PORT]
+    quit("""Usage: interactive_repy_console.r2py [LISTEN_PORT]
 where LISTEN_PORT is an optional port I should listen on. When omitted, 
 an available TCP port is chosen automatically, and announced in the VM log.
 """)
-    exitall()
   except IndexError:
-    # No port arg was given. Try to find a port ourselves!
-    for listen_port in getresources()[0]["connport"]:
-      try:
-        listen_socket = listenforconnection(getmyip(), listen_port)
-        log("Listening on", getmyip(), "port", listen_port, "\n")
-        break
-      except (AlreadyListeningError, DuplicateTupleError, 
-          RepyArgumentError, ResourceForbiddenError, AddressBindingError):
-        # These are all indicative that we can't listen here. Keep trying!
-        pass
-    else:
-      # If we end up here, none of the ports worked. Quit!
-      quit("Sorry, none of the ports I tried would work. I'm giving up.\n")
+    # No port arg was given. Let's try all of the available ones then.
+    listen_port_list = getresources()[0]["connport"]
+
+  for listen_port in listen_port_list:
+    try:
+      listen_socket = listenforconnection(getmyip(), listen_port)
+      log("Listening on", getmyip(), "port", listen_port, "\n")
+      break
+    except (AlreadyListeningError, DuplicateTupleError, 
+        RepyArgumentError, AddressBindingError):
+      # These are all indicative that we can't listen here. Keep trying!
+      pass
+    except ResourceForbiddenError:
+      log("I cannot use port", listen_port, "for listening. Are you sure "
+          "my resource restrictions allow it?\n")
+  else:
+    # If we end up here, none of the ports worked. Quit!
+    quit("Sorry, none of the ports I tried would work. I'm giving up.\n")
 
   # Down here, all is well. We have a listening socket for the user.
   # Let's see when they connect in.
