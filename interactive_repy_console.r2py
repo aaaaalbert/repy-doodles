@@ -47,16 +47,15 @@ real_log = log
 def exitall():
   pass
 
-
 def log(*args):
   """Print the given arguments to the VM log. 
   XXX In a later implementation, send them to the Telnet client too."""
   string_to_print = ""
   for arg in args:
-    real_log("Arg is", arg)
     string_to_print += str(arg) + " "
 
-  # Drop the last space
+  # Drop the last space which would potentially be printed after a 
+  # user-supplied "\n" and thus indent the next line
   string_to_print = string_to_print[:-1]
 
   # Append stuff to the "stdout" which will be sent to the user client
@@ -105,8 +104,8 @@ to stop and then restart the VM.
 
 def create_server(remote_ip, remote_port, user_connection):
   """This will return an argument-less function for `createthread`. 
-  The arguments given will be available to the function we return 
-  via a closure."""
+  The arguments referring to the client's network connection will 
+  be available to the function we return via a closure."""
 
   def server():
     """The server function handling a client. This creates separate 
@@ -117,9 +116,10 @@ def create_server(remote_ip, remote_port, user_connection):
     stdout = []
     stdin = []
 
-    def log(*args):
+    def server_log(*args):
       for arg in args:
-        stdout.append(str(args) + " ")
+        stdout.append(str(arg) + " ")
+      stdout.append("\n")
 
     def handle_user_output():
       """If there is anything in the `stdout` list (because the user or 
@@ -164,20 +164,24 @@ def create_server(remote_ip, remote_port, user_connection):
       """A currently very hacky eval-like function. Doesn't do natural 
       line continuation, multiline statements, triple-quoted strings, or 
       anything, yet.
-      Reads a line from stdin, tries to evaluate it in a virtual namespace."""
+      Doesn't print results of statements either.
+      Reads a line from stdin, tries to evaluate it in a virtual namespace, 
+      repeats forever."""
       while True:
-        try:
-          statement = stdin.pop(0)
-          break
-        except IndexError:
-          sleep(0.1)
+        while True:
+          try:
+            statement = stdin.pop(0)
+            break
+          except IndexError:
+            sleep(0.1)
         
-      vn = createvirtualnamespace(statement, "TheEvalLoop")
-      try:
-        results = vn.evaluate(_context)
-        log(results)
-      except Exception, e:
-        log(repr(e))
+        try:
+          vn = createvirtualnamespace(statement, "TheEvalLoop")
+          _context["log"] = server_log
+          vn.evaluate(_context)
+        except Exception, e:
+          stdout.append(repr(e))
+          log(repr(e))
 
     createthread(evaluate_user_input)
 
