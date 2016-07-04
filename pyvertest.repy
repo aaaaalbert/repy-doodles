@@ -1,10 +1,46 @@
 """
 pyvertest.repy -- Find platform info on Seattle vessels through Repy.
+
+This is based on small Write Once, Run Anywhere (``WORA'') violations 
+due to the exact Python version Seattle runs on.
+
+Py2.[56] WORA headaches...
+http://docs.python.org/2/whatsnew/2.6.html#pep-3101-advanced-string-formatting
+  ("".format())
+http://docs.python.org/2/whatsnew/2.6.html#pep-3110-exception-handling-changes
+  (except FooException as something_else:)
+http://docs.python.org/2/whatsnew/2.6.html#pep-3112-byte-literals
+  (bytes as new data type)
+http://docs.python.org/2/whatsnew/2.6.html#pep-3127-integer-literal-support-and-syntax
+  (0o1234 as a new way of specifying octal numbers)
+
+
+Py2.[67] WORA headaches...
+http://docs.python.org/2/whatsnew/2.7.html#pep-378-format-specifier-for-thousands-separator
+rhea:seattle_repy albert$ python2.5
+>>> '{:20,d}'.format(18446744073709551616)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'str' object has no attribute 'format'
+>>> ^D
+
+rhea:seattle_repy albert$ python2.6
+>>> '{:20,d}'.format(18446744073709551616)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+ValueError: zero length field name in format
+>>> ^D
+
+rhea:seattle_repy albert$ python2.7
+>>> '{:20,d}'.format(18446744073709551616)
+'18,446,744,073,709,551,616'
+>>> 
+
 """
+
 
 def pretending_callback(*args):
   sleep(10)
-
 
 
 
