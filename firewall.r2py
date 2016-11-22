@@ -95,8 +95,31 @@ def firewalled_openconnection(destip, destport, localip, localport, timeout):
   for subnet in firewalled_subnets:
     if subnet.contains(destip):
       raise ConnectionRefusedError("The connection was refused!")
- else:
-   # We didn't raise yet, so the destination isn't firewalled.
-   # Proceed with connecting as normal.
-   return openconnection(destip, destport, localip, localport, timeout)
- 
+  else:
+    # We didn't raise yet, so the destination isn't firewalled.
+    # Proceed with connecting as normal.
+    return openconnection(destip, destport, localip, localport, timeout)
+
+
+
+# Define shorthands for the various entries in the child context definition
+TYPE = "type"
+ARGS = "args"
+ANY = "any"
+RETURN = "return"
+EXCP = "exceptions"
+TARGET = "target"
+FUNC = "func"
+OBJC = "objc"
+
+CHILD_CONTEXT_DEF["sendmessage"] = {
+  TYPE: FUNC, ARGS: ANY, RETURN: ANY, EXCP: ANY, TARGET: firewalled_sendmessage
+}
+
+CHILD_CONTEXT_DEF["openconnection"] = {
+  TYPE: FUNC, ARGS: ANY, RETURN: ANY, EXCP: ANY, TARGET: firewalled_openconnection
+}
+
+# Dispatch this module, let the next (if any) run
+secure_dispatch_module()
+
