@@ -33,6 +33,12 @@ inside Interactive Repy Console to see if it performs as expected.
 When in doubt, call the help() function on the prompt.
 """
 
+# The prompt prefixes, cf. Python's `sys.ps1` and `sys.ps2`
+PS1 = ">>> "
+PS2 = "... "
+
+
+
 # Here we store input and output from/to the user's 
 # network session (and the VM log).
 stdin = []
@@ -40,12 +46,12 @@ stdout = []
 
 
 
-# Override a few RepyV2 API calls
-real_exitall = exitall
-real_log = log
+# Stash a few RepyV2 API calls that we will override
+_exitall = exitall
+_log = log
 
 def exitall():
-  pass
+  log("NOTE: exitall is not available. See help().")
 
 def log(*args):
   """Print the given arguments to the VM log. 
@@ -62,15 +68,15 @@ def log(*args):
   stdout.append(string_to_print)
 
   # Print to the VM log too
-  real_log(string_to_print)
+  _log(string_to_print)
 
 
 
-def quit(message="Quitting Interactive Repy Console (and any thread that "
+def quit(message="Quitting Interactive Repy Console (and any threads that "
         "might be running still).\n"):
   if message:
     log(message)
-  real_exitall()
+  _exitall()
 
 
 
@@ -90,15 +96,58 @@ quit(message=...)
 start(file) -- imports file and calls into `if callfunc=="initialize": ...`,
                as seash's `start` command would do
 
-Note: The following Repy functions been overwritten by Interactive Repy Console:
+Note: Interactive Repy Console overrides the following Repy functions:
 exitall()   -- will not perform any function
 log(*args)  -- will both print to the VM log and this network connection
 
-You can always get the original functions back, they are stored as "real_*". 
+You can always get the original functions back, they are stored as
+`_log` and `_exitall`. However, note that `_log` only writes to the
+VM log, not to this network connection, and `_exitall` exit every
+thread in this session, including Interactive Repy Console's!
+
 In case anything goes wrong because your code hangs etc., just use seash 
 to stop and then restart the VM.
 
+CAVEAT -- This program is incomplete and fragile!
+* The console doesn't fully parse your input. When in doubt, press
+  enter twice.
+* The console will evaluate statments like "25+7", but not print
+  the results. Use `log(25+7)` instead.
+* Using variable and function names that don't exist currently
+  crashes the console. See SeattleTestbed/repy_v2#132 for background.
+
 """)
+
+
+def cat(filename):
+  """`cat` (i.e. display the contents of) a file.
+  Do this in chunks so as to not cache the whole file before printing."""
+  CHUNKSIZE = 1000
+  filehandle = openfile(filename, False)
+  seek_pointer = 0
+  while True:
+    try:
+      chunk = filehandle.readat(CHUNKSIZE, seek_pointer)
+      if chunk == "":
+        break
+      stdout.append(chunk)
+      seek_pointer += len(chunk)
+    except SeekPastEndOfFileError:
+      filehandle.close()
+
+
+
+def start(filename):
+  """Read the contents of a file, and execute them as if `start`ed
+  in seash. If the file defines functions etc., these will become
+  available in the global namespace. (For finer-grained imports,
+  run the console under `dylink`.)
+  """
+  filehandle = openfile(filename, False)
+  code = filehandle.readat(None, 0)
+  filehandle.close()
+  namespace = createvirtualnamespace(code, filename)
+  namespace.evaluate(_context)
 
 
 
@@ -111,15 +160,15 @@ def create_server(remote_ip, remote_port, user_connection):
     """The server function handling a client. This creates separate 
     threads for sending output we generate, receiving user input, and 
     evaluating the input (probably to generate further output)."""
-    real_log("Incoming client on", remote_ip, "port", remote_port, "\n")
+    _log("Incoming client on", remote_ip, "port", remote_port, "\n")
     # Redirect the log function to the user session
-    stdout = []
+    stdout = ["""Welcome to the Interactive RepyV2 Console!
+Type `help()` for help.""" + "\n" + PS1]
     stdin = []
 
     def server_log(*args):
       for arg in args:
         stdout.append(str(arg) + " ")
-      stdout.append("\n")
 
     def handle_user_output():
       """If there is anything in the `stdout` list (because the user or 
@@ -129,7 +178,7 @@ def create_server(remote_ip, remote_port, user_connection):
         try:
           this_line = stdout.pop(0)
         except IndexError:
-          sleep(0.5)
+          sleep(0.1)
           continue
         while len(this_line) > 0:
           try:
@@ -147,6 +196,7 @@ def create_server(remote_ip, remote_port, user_connection):
       to form full input lines to be evaluated, keep receiving if 
       a line is not complete yet."""
       received_input = ""
+      prompt_prefix = PS1
       while True:
         try:
           received_input += user_connection.recv(100)
@@ -158,6 +208,15 @@ def create_server(remote_ip, remote_port, user_connection):
           lines = received_input.split("\n")
           stdin.extend(lines[:-1])
           received_input = lines[-1]
+          for line in lines[:-1]:
+            if line == "":
+              # Only unindent after a single empty line
+              prompt_prefix = PS1
+            elif prompt_prefix == PS1:
+              # XXX No proper single-line detection, always assume indent!
+              prompt_prefix = PS2
+            stdout.append(prompt_prefix * (len(lines)-1))
+
     createthread(handle_user_input)
 
     def evaluate_user_input():
@@ -165,23 +224,29 @@ def create_server(remote_ip, remote_port, user_connection):
       line continuation, multiline statements, triple-quoted strings, or 
       anything, yet.
       Doesn't print results of statements either.
-      Reads a line from stdin, tries to evaluate it in a virtual namespace, 
+      Reads lines from stdin, momentarily stops reading when seeing
+      an empty line which it considers an end-of-block marker, then
+      tries to evaluate the block of lines in a virtual namespace,
       repeats forever."""
       while True:
+        # Queue up lines making up a code block here
+        code_queue = []
         while True:
           try:
             statement = stdin.pop(0)
-            break
+            if statement == "":
+              break
+            else:
+              code_queue.append(statement)
           except IndexError:
             sleep(0.1)
-        
+
         try:
-          vn = createvirtualnamespace(statement, "TheEvalLoop")
+          vn = createvirtualnamespace("\n".join(code_queue), "TheEvalLoop")
           _context["log"] = server_log
           vn.evaluate(_context)
         except Exception, e:
-          stdout.append(repr(e))
-          log(repr(e))
+          stdout.append(getlasterror() + "\n")
 
     createthread(evaluate_user_input)
 
