@@ -1,0 +1,132 @@
+"""udpping.r2py --- a "UDP ping" client and server
+
+Request packet format:
+* Sender sequence number
+* Sender timestamp
+* Sender's desired reply size; 0 for echoing the sent packet
+* Padding bytes (for upstream test)
+
+Response packet format:
+* All of the sender's information
+* Receiver sequence number
+* Receiver timestamp
+* Receive message size
+* Padding bytes to match sender's desired reply size (for downstream test)
+"""
+
+usage = """USAGE:
+
+udpping.r2py server PORT
+udpping.r2py SERVER_IP SERVER_PORT ...
+"""
+
+# Define shorthands for populating the experiment schedule dicts
+T = "duration"   # Send at this packet rate for that many seconds
+I = "bytes_into" # Packet size
+D = "delay"      # Delay between packets
+R = "reply_size" # Request reply of this size from server. (Leaving the
+                 # key out makes the server echo the full request instead.)
+
+# Ramp up from 100 Bps to 1kBps in 10s installments.
+# Finish with 10 seconds of low rate.
+experiment1 = []
+for bytes_into in range(25, 250+25, 25):
+  experiment1.append({T: 10, I: bytes_into, D: 0.25})
+experiment1.append({T: 10, I: 25, D: 0.25})
+
+
+
+schedule = experiment1
+
+
+
+def run_server(server_ip, server_port):
+  server_socket = listenformessage(server_ip, server_port)
+  log("udpping server listening on", server_ip + ":" + str(server_port), "\n")
+  # XXX Do we need per-client seq numbers? (Will there be multiple clients?)
+  server_seq = 0
+  while True:
+    try:
+      server_time = getruntime()
+      client_ip, client_port, request_message = server_socket.getmessage()
+      server_seq += 1
+      output = "SERVER " + str(getruntime()) + " " + request_message[:50] + "...\n"
+      log(output)
+      client_seq, client_time, reply_size, padding = request_message.split()
+      if reply_size == 0:
+        # Echo the original message, plus our reception details
+        reply_message = (request_message + " " + str(server_seq) + " " +
+            str(server_time) + " " + str(len(request_message)))
+        sendmessage(client_ip, client_port, reply_message, server_ip, server_port)
+      else:
+        # A reply size was requested, so don't blindy echo.
+        # Do echo the client's header info, but reduce padding to 1 byte.
+        # (I do this to keep fields identically aligned.)
+        reply_message_header = (client_seq + " " + client_time + " " +
+            reply_size + " c " + str(server_seq) + " " + str(server_time) +
+            " " + str(len(request_message)) + " ")
+        sendmessage(client_ip, client_port, reply_message_header +
+            "s" * (int(reply_size)-len(reply_message_header)),
+            server_ip, server_port)
+    except SocketWouldBlockError:
+      pass
+
+
+def run_client(client_ip, source_port):
+  log("Starting reply receiver on", client_ip, "port", source_port, "\n")
+  createthread(reply_receiver(client_ip, source_port))
+  client_seq = 0
+  while True:
+    try:
+      this_iteration = schedule.pop(0)
+      outstring = "Next schedule: " + str(this_iteration) + "\n"
+      log(outstring)
+    except:
+      break
+    start_time = getruntime()
+    while getruntime()-start_time < this_iteration["duration"]:
+      reply_size = str(this_iteration.get("reply_size", 0))
+      message_header = (str(client_seq) + " " + str(getruntime()) + " " +
+          reply_size + " ")
+      sendmessage(server_ip, server_port, message_header +
+          "C" * (this_iteration["bytes_into"]-len(message_header)),
+          client_ip, source_port)
+      client_seq += 1
+      sleep(this_iteration["delay"])
+
+
+
+
+def reply_receiver(ip, port):
+  def argumentless_reply_receiver():
+    reply_receiver_socket = listenformessage(ip, port)
+    while True:
+      try:
+        receive_timestamp = getruntime()
+        server_ip, server_port, server_message = reply_receiver_socket.getmessage()
+        client_seq, client_send_time, _ = server_message.split(" ", 2)
+        output = ("RECEIVER " + str(receive_timestamp) + " " +
+            str(len(server_message)) + " " + server_message + "\n")
+        log(output)
+        output = ("RTT " + str(client_seq) + " " +
+            str(receive_timestamp-float(client_send_time)) + "\n")
+        log(output)
+      except:
+        pass
+  return argumentless_reply_receiver
+
+
+try:
+  server_port = int(callargs[1])
+  if callargs[0] == "server":
+    run_server(getmyip(), server_port)
+  else:
+    server_ip = callargs[0]
+    source_port = list(getresources()[0]["messport"])[0]
+    run_client(getmyip(), source_port)
+    # Force-exit to stop the reply receiver thread when the schedule is done.
+    exitall()
+except (IndexError, ValueError), e:
+  log("Error in arguments. Usage:\n", usage, "\n\n")
+  exitall()
+
