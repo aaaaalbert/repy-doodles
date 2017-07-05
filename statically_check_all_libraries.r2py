@@ -1,0 +1,22 @@
+"""
+Check [0] that all libraries [1] in this directory can be imported.
+(See SeattleTestbed/seattlelib_v2#192 for why it makes sense to
+check this at all.)
+
+[0] I.e., read in their code and try to evaluate them in a virtual
+    namespace. This approach doesn't yet work for libraries that
+    use `dylink` or the RepyV2 API, but points out issues in `safe`'s
+    static code checks.
+[1] We treat things that are RepyV2 programs but *not* unit test cases
+    as "libraries."
+"""
+for filename in listfiles():
+  if filename.endswith(".r2py") and not filename.startswith("ut_"):
+    try:
+      filehandle = openfile(filename, False)
+      contents = filehandle.readat(None, 0)
+      vn = createvirtualnamespace(contents, filename + "'s virtual namespace")
+      vn.evaluate({})
+    except Exception, e:
+      log("Error", repr(e), "in module", filename, "\n")
+
