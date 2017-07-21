@@ -1,0 +1,42 @@
+"""
+# Overview
+
+The TCP relay has two groups of server ports:
+* Some for incoming control connections from clients,
+* Some for incoming userplane connections from remote stations.
+
+To set up relaying, a client
+* Connects to a control port on the relay,
+* Receives the relayed listening port supplied by the relay, and
+* Keeps the control connection alive as long as it uses the relay.
+
+To receive incoming connections on the relayed port, the client
+connects to its relay control port from a different source port.
+The relay then
+* Closes the connection if no incoming remote station waits, or
+* Sends the remote station's IP address and port, then proceeds
+  to forward data betweeen the client and the remote station.
+
+Connection closes from either side cause the forwarded connection
+to be closed by the relay as well.
+
+
+# Commentary
+
+The assumption for the "receive incoming" part to work is that
+* It suffices to identify (ahem) clients by their public IP address.
+* Although multiple clients may share the same IP, we hope that
+  - Each client likely uses a different control port (or relay).
+  - Even if a second client on that public IP and relay tries an
+    already-used control port, the probability is low that a new
+    remote station comes in at that very moment. Thus, the second
+    client's connection will be dropped instantly.
+(If this becomes a problem, we can try to enforce collision-free port
+usage by clients on the same public IP, or add application-layer tokens.)
+
+Clients that share a pubic IP must use different control ports on
+the same relay. However, clients from different public IPs may share
+the control port. This may skew the proportion of control to relayed
+ports to our favor (i.e. yield more relayed ports).
+"""
+
