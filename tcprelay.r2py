@@ -1,4 +1,25 @@
 """
+tcprelay.r2py --- a simplistic TCP relay
+
+Usage:
+
+To start a TCP relay on your vessel, no arguments are needed:
+  tcprelay.r2py
+
+(By default, the first half of the vessel's connports will be
+used as control ports. See the vessel log for details.)
+
+To use a TCP relay for listening on behalf of LOCAL_PORT, use
+``client'' mode and specify which RELAY_IP_ADDRESS and RELAY_PORT
+to use:
+  tcprelay.r2py client LOCAL_PORT RELAY_IP_ADDRESS RELAY_PORT
+
+(This is similar to `ssh`'s -L option. Incoming forwarded
+connections are then made available on the local port, to
+which you can connect using `netcat` or similar, e.g.
+`nc 127.0.0.1 LOCAL_PORT`)
+
+-----
 # Overview
 
 The TCP relay has two groups of server ports:
@@ -12,10 +33,13 @@ To set up relaying, a client
 
 To receive incoming connections on the relayed port, the client
 connects to its relay control port from a different source port.
-The relay then
-* Closes the connection if no incoming remote station waits, or
-* Sends the remote station's IP address and port, then proceeds
-  to forward data betweeen the client and the remote station.
+The relay then does either of two things:
+* If no incoming remote station waits, it closes the connection
+* Else, it
+  - Accepts the connection,
+  - Sends the remote station's IP address and port on the control
+    connection, and then
+  - forwards data betweeen the client and the remote station.
 
 Connection closes from either side cause the forwarded connection
 to be closed by the relay as well.
