@@ -63,4 +63,246 @@ the same relay. However, clients from different public IPs may share
 the control port. This may skew the proportion of control to relayed
 ports to our favor (i.e. yield more relayed ports).
 """
+# Buffer at most this many bytes for relaying between hosts
+MAX_BUFFER_LEN = 1400
+
+def do_forward(client_ip, client_port, client_socket, remote_ip,
+    remote_port, remote_socket, client_buffer, remote_buffer, is_alive):
+  # The interesting logic down here works like this:
+  # If the connection is still alive, receive as much as we can possibly
+  # forward into the buffer. Then, regardless of liveliness, send from
+  # the buffer into the socket. Do this for both directions (from/to
+  # client/remote station).
+  # If we think the connection isn't live anymore, stop receiving, but
+  # still try to clear out our buffers.
+  if is_alive:
+    remote_buffer_space = MAX_BUFFER_LEN - len(remote_buffer)
+    if remote_buffer_space > 0:
+      try:
+        remote_buffer += client_socket.recv(remote_buffer_space)
+      except SocketWouldBlockError:
+        pass
+      except (SocketClosedLocal, SocketClosedRemote):
+        is_alive = False
+        client_buffer = ""
+
+  try:
+    bytes_sent = remote_socket.send(remote_buffer)
+    remote_buffer = remote_buffer[bytes_sent:]
+  except SocketWouldBlockError:
+    pass
+  except (SocketClosedLocal, SocketClosedRemote):
+    is_alive = False
+    remote_buffer = ""
+
+  if is_alive:
+    client_buffer_space = MAX_BUFFER_LEN - len(client_buffer)
+    if client_buffer_space > 0:
+      try:
+	client_buffer += remote_socket.recv(client_buffer_space)
+      except SocketWouldBlockError:
+	pass
+      except (SocketClosedLocal, SocketClosedRemote):
+	is_alive = False
+	remote_buffer = ""
+
+  try:
+    bytes_sent = client_socket.send(client_buffer)
+    client_buffer = client_buffer[bytes_sent:]
+  except SocketWouldBlockError:
+    pass
+  except (SocketClosedLocal, SocketClosedRemote):
+    is_alive = False
+    client_buffer = ""
+
+  return client_buffer, remote_buffer, is_alive
+
+
+
+
+
+def run_server():
+  log("Starting TCP relay on IP address", getmyip(), "\n")
+  # Ratio of control ports among total connports. Note `float`.
+  CONTROL_PORT_RATIO = float(1)/2
+  connports = list(getresources()[0]["connport"])
+  connports.sort()
+  control_port_count = int(CONTROL_PORT_RATIO * len(connports))
+  control_ports = connports[:control_port_count]
+  relay_ports = connports[control_port_count:]
+  log("Control ports:", control_ports, "\nRelay ports:", relay_ports, "\n")
+
+  # These store the listening sockets for incoming connections.
+  # relay_sockets is indexed by (client_ip, control_port).
+  control_sockets = []
+  relay_sockets = {}
+
+  for port in control_ports:
+    try:
+      control_sockets.append((port, listenforconnection(getmyip(), port)))
+    except Exception, e:
+      log("Error attempting to listen on port " + str(port) + ": " + repr(e))
+  if len(control_sockets)==0:
+    log("Failed to listen on any of the control ports. Exiting.")
+    exitall()
+
+  # This stores all of our connections.
+  # "control new" stores the control port and client details.
+  # All sub-dicts are indexed by (client_ip, control_port).
+  # "control known" has the per-client control socket object.
+  # "relay new" stores a per-client list of IP, port, socket for incoming
+  # remote station connections.
+  # "relay known" stores a per-client list of tuples that contain all the
+  # connection details, socket objects, buffers, and status for the
+  # client-to-relay and relay-to-remote-station connections.
+  connections = {
+      "control new": [],   # Accepted incoming control connections
+      "control known": {}, # Existing control connections
+      "relay new": {},     # Accepted incoming relay connections
+      "relay known": {},   # Existing relay connections
+      }
+
+  def handle_control_connections():
+    # Check all control sockets for new connections
+    for control_port, control_socket in control_sockets:
+      try:
+        client_ip, client_port, client_socket = control_socket.getconnection()
+        connections["control new"].append((control_port, client_ip,
+            client_port, client_socket))
+      except SocketWouldBlockError:
+        pass
+
+    # Handle all new control connections
+    for control_port, client_ip, client_port, client_socket in connections["control new"]:
+      # Check if we know this client IP address.
+      # XXX This is where multiple clients behind the same NAT gateway
+      # XXX may clash and we may leak incoming connections.
+      known_client_ids = connections["control known"].keys()
+      is_known_client = False
+      for ip, port in known_client_ids:
+        if client_ip == ip:
+          is_known_client = True
+          break
+
+      client_id = (client_ip, control_port)
+      if is_known_client:
+        # An existing client asks for a new incoming relayed connection.
+        # Store the client socket, remote side details, two empty buffers,
+        # and a liveliness flag for the actual forwarding.
+        try:
+          remote_ip, remote_port, remote_socket = connections["relay new"][client_id].pop(0)
+          connections["relay known"][client_id].append((client_socket,
+              remote_ip, remote_port, remote_socket, "", "", True))
+          connections["control known"][client_id].send("New remote station " +
+              remote_ip + " port " + str(remote_port) + ".\n")
+        except IndexError:
+          # There was no new connection to relay
+          client_socket.close()
+        except KeyError:
+          # A known IP address contacts us on a different control port
+          # than it used previously. Set up a new forward below!
+          is_known_client = False
+
+      if not is_known_client:
+        # We don't know this client. Set up a new forward for them.
+        # (Note that we check once more if we know them and don't just
+        # `else` on the previous clause because this might be a new
+        # client from a known IP address.)
+        for relay_port in relay_ports:
+          try:
+            relay_socket = listenforconnection(getmyip(), relay_port)
+            # XXX This could block!
+            client_socket.send("Your relayed port is " + str(relay_port) + ".\n")
+            # Only if this worked out, commit this new client to the
+            # relevant interal data structures.
+            relay_sockets[client_id] = relay_socket
+            connections["control known"][client_id] = client_socket
+            connections["relay new"][client_id] = []
+            connections["relay known"][client_id] = []
+            break
+          except AlreadyListeningError:
+            continue
+        else:
+          try:
+            # Be verbose, tell them what went wrong
+            client_socket.send("No free relay port, sorry!")
+          except:
+            pass
+          client_socket.close()
+        # Every previously known client now either got a new relayed
+        # connection, or got signaled that there is none;
+        # Every previously new client is a know client with a relayed
+        # port now, or got signaled that we can't forward for them.
+    connections["control new"] = []
+
+    # Now handle existing control connections to weed out unused ones.
+    for client_id, client_socket in connections["control known"].items():
+      try:
+        try:
+          # Ignore whatever they send
+          client_socket.recv(1400)
+        except SocketWouldBlockError:
+          pass
+        try:
+          # Send nothing, just as a liveliness check
+          client_socket.send("")
+        except SocketWouldBlockError:
+          # Send buffer full? That's interesting!
+          pass
+      except (SocketClosedLocal, SocketClosedRemote):
+        # The control connection has gone down. Remove this client.
+        # XXX We currently keep their existing relayed connections until a
+        # XXX new client from the same IP address reuses this control port.
+        del connections["control known"][client_id]
+        # XXX We should clean up the other data structures too!
+
+
+
+  def handle_relayed_connections():
+    # Check all relay sockets for new connections.
+    # Store new relay connections for known clients; the connections
+    # are handled when the client connects to its control port (above).
+    for client_id, relay_socket in relay_sockets.items():
+      try:
+        connection_details = relay_socket.getconnection()
+        connections["relay new"][client_id].append(connection_details)
+      except SocketWouldBlockError:
+        pass
+
+    for client_id, details_list in connections["relay known"].items():
+      (client_ip, client_port) = client_id
+      new_details_list = []
+      for (client_socket, remote_ip, remote_port, remote_socket,
+          client_buffer, remote_buffer, is_alive) in details_list:
+        # Do the actual forward, update buffers and liveliness
+        client_buffer, remote_buffer, is_alive = do_forward(client_ip,
+            client_port, client_socket, remote_ip, remote_port,
+            remote_socket, client_buffer, remote_buffer, is_alive)
+        # If either side has hung up and the data it sent has been forwarded,
+        # close down the remaining connection.
+        if not is_alive and len(client_buffer) == 0 and len(remote_buffer) == 0:
+          remote_socket.close()
+          client_socket.close()
+        else:
+          # We're still alive. Keep this connection.
+          new_details_list.append((client_socket, remote_ip, remote_port,
+              remote_socket, client_buffer, remote_buffer, is_alive))
+
+      # Update details of this client's relayed connections
+      connections["relay known"][client_id] = new_details_list
+
+
+  while True:
+    handle_control_connections()
+    handle_relayed_connections()
+
+
+
+if callfunc=="initialize":
+  if len(callargs)==0:
+    # Server mode!
+    run_server()
+  elif len(callargs)==4:
+    # Client / local-forward mode
+    log("Sorry, not yet implemented...\n")
 
