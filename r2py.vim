@@ -64,7 +64,7 @@ if !exists("python_no_builtin_highlight")
   " RepyV2 additional keywords
   syn keyword pythonBuiltin	gethostbyname getmyip
   syn keyword pythonBuiltin	sendmessage listenformessage
-  syn keyword pythonBuiltin	openconnection listenfoconnection
+  syn keyword pythonBuiltin	openconnection listenforconnection
   syn keyword pythonBuiltin	openfile listfiles removefile
   syn keyword pythonBuiltin	exitall getruntime randombytes sleep log
   syn keyword pythonBuiltin	createthread createlock getthreadname
