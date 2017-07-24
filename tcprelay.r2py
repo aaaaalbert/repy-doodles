@@ -66,6 +66,105 @@ ports to our favor (i.e. yield more relayed ports).
 # Buffer at most this many bytes for relaying between hosts
 MAX_BUFFER_LEN = 1400
 
+# These are control messages from the relay to the client on
+# the control connection.
+YOUR_RELAYED_PORT_IS = "Your relayed port is "
+NEW_REMOTE_STATION = "New remote station "
+
+
+def relayedlisten(relayip, relayport, localip, localport):
+  """
+  Contact the given relay, and return the relayed port and an
+  object that behaves like a Repy TCP server socket with
+  `getconnection` and `close`.
+  This function is similar to RepyV2's `listenforconnection`, but
+  it takes more parameters and may raise additional exceptions
+  (which arise in `openconnection` towards the relay).
+  """
+  relayed_listen_socket = RelayedTCPListenSocket(relayip, relayport, localip, localport)
+  return relayed_listen_socket.relayed_listen_port, relayed_listen_socket
+
+
+
+class RelayedTCPListenSocket():
+  """Implement a socket-like class that behaves mostly like a RepyV2
+  TCPServerSocket. Behind the scenes, contact the TCP relay given at
+  instantion time, use the control connection to pick up new incoming
+  connections from remote stations, and return these connections as
+  Repy TCP sockets when `getconnection` is called.
+  """
+  control_socket = None
+
+  def __init__(self, relayip, relayport, localip, localport):
+    self.relayip = relayip
+    self.relayport = relayport
+    self.localip = localip
+    self.control_socket = openconnection(relayip, relayport, localip, localport, 5)
+    started = getruntime()
+    while getruntime()-started < 5:
+      try:
+        port_info = self.control_socket.recv(100)
+        self.relayed_listen_port = int(port_info[len(YOUR_RELAYED_PORT_IS):-1])
+        break
+      except SocketWouldBlockError:
+        sleep(0.1)
+    else:
+      # We never received info about our relayed port from the relay.
+      # Abort this control connection.
+      self.close()
+      raise TCPServerSocketInvalidError("Did not receive a relayed port.")
+
+  def close(self):
+    self.control_socket.close()
+
+  def getconnection(self):
+    # Connect to the relay and return a socket for a new incoming
+    # connection from a remote host, or raise if there was none.
+    for source_port in list(getresources()[0]["connport"]):
+      try:
+        relayed_socket = openconnection(self.relayip, self.relayport,
+            self.localip, source_port, 5)
+        break
+      except (AlreadyListeningError, DuplicateTupleError, RepyArgumentError, TimeoutError, CleanupInProgressError):
+        # Retry using a different port
+        continue
+      except (ConnectionRefusedError, InternetConnectivityError), e:
+        # The relay and our relayed socket have become stale. This is fatal.
+        raise TCPServerSocketInvalidError("No connection to relay " +
+            self.relayip + " port " + str(self.relayport) + ", error '" +
+            repr(e) + "'.")
+
+    # See if the relayed socket is still open.
+    for i in range(10):
+      try:
+        relayed_socket.send("")
+        break
+      except SocketWouldBlockError:
+        # We couldn't yet send.
+        # XXX I'm not sure if this means that the connection is set up
+        # XXX and usable from the API's point of view, so let's retry.
+        # XXX (I'm really waiting for a SocketClosed... to be sure.)
+        sleep(0.1)
+      except (SocketClosedRemote, SocketClosedLocal):
+        # If the relayed socket has been closed, there is no new
+        # remote station connecting in to us.
+        raise SocketWouldBlockError
+
+    # Looks like we have a new remote station connecting in.
+    # The control socket tells us who this is.
+    try:
+      who_is_it = self.control_socket.recv(100)
+    except (SocketClosedRemote, InternetConnectivityError), e:
+      raise TCPServerSocketInvalidError("Lost connection to the TCP relay, " +
+          "error '" + repr(e) + "'.")
+
+    remote_ip, remote_port = who_is_it[len(NEW_REMOTE_STATION):-1].split()
+    return remote_ip, remote_port, relayed_socket
+
+
+
+
+
 def do_forward(client_ip, client_port, client_socket, remote_ip,
     remote_port, remote_socket, client_buffer, remote_buffer, is_alive):
   # The interesting logic down here works like this:
@@ -193,8 +292,8 @@ def run_server():
           remote_ip, remote_port, remote_socket = connections["relay new"][client_id].pop(0)
           connections["relay known"][client_id].append((client_socket,
               remote_ip, remote_port, remote_socket, "", "", True))
-          connections["control known"][client_id].send("New remote station " +
-              remote_ip + " port " + str(remote_port) + ".\n")
+          connections["control known"][client_id].send(NEW_REMOTE_STATION +
+              remote_ip + " " + str(remote_port) + "\n")
         except IndexError:
           # There was no new connection to relay
           client_socket.close()
@@ -212,7 +311,7 @@ def run_server():
           try:
             relay_socket = listenforconnection(getmyip(), relay_port)
             # XXX This could block!
-            client_socket.send("Your relayed port is " + str(relay_port) + ".\n")
+            client_socket.send(YOUR_RELAYED_PORT_IS + str(relay_port) + "\n")
             # Only if this worked out, commit this new client to the
             # relevant interal data structures.
             relay_sockets[client_id] = relay_socket
