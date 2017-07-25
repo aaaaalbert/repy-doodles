@@ -1,13 +1,30 @@
 """
 tcprelay.r2py --- a simplistic TCP relay
 
-Usage:
+USAGE as a client-side library:
+
+* Determine the IP address and control port of the TCP relay to use
+* Set up a relayed listen socket by calling `relayedlisten` with
+  appropriate arguments
+* Proceed to use this socket like a normal RepyV2 TCPServerSocket,
+  i.e. call its `getconnection` method to receive incoming (relayed)
+  connections on your forwarded relay port, and `close` it when you
+  are done listening.
+(Hint: If the relay immediately drops your connection, try a different
+control port. The current one might be taken by a client from the same
+public IP address as yours.)
+
+
+USAGE for running a TCP relay:
 
 To start a TCP relay on your vessel, no arguments are needed:
   tcprelay.r2py
 
 (By default, the first half of the vessel's connports will be
 used as control ports. See the vessel log for details.)
+
+
+USAGE as a command-line client:
 
 To use a TCP relay for listening on behalf of LOCAL_PORT, use
 ``client'' mode and specify which RELAY_IP_ADDRESS and RELAY_PORT
@@ -19,8 +36,10 @@ connections are then made available on the local port, to
 which you can connect using `netcat` or similar, e.g.
 `nc 127.0.0.1 LOCAL_PORT`)
 
+
 -----
-# Overview
+
+# Design Overview
 
 The TCP relay has two groups of server ports:
 * Some for incoming control connections from clients,
@@ -29,35 +48,61 @@ The TCP relay has two groups of server ports:
 To set up relaying, a client
 * Connects to a control port on the relay,
 * Receives the relayed listening port supplied by the relay, and
-* Keeps the control connection alive as long as it uses the relay.
+* Sets up a secondary connection to the control port which will be
+  used to forward data as soon as an incoming remote host connects.
+
+The client keeps the control connection alive as long as it uses the relay.
 
 To receive incoming connections on the relayed port, the client
-connects to its relay control port from a different source port.
-The relay then does either of two things:
-* If no incoming remote station waits, it closes the connection
-* Else, it
-  - Accepts the connection,
-  - Sends the remote station's IP address and port on the control
-    connection, and then
-  - forwards data betweeen the client and the remote station.
+receives data from the primary control connection.
+* If an incoming remote host waits,
+  - the relay sends the remote host's IP address and port, and
+  - internally connects the client's secondary connection to the
+    incoming remote host connection to forward data between them.
+  - The client establishes a new secondary connection in preparation
+    for the next incoming remote host connection.
+* If there is no incoming host, there is no data on the relay-to-client
+  connection.
 
-Connection closes from either side cause the forwarded connection
-to be closed by the relay as well.
+Connection closes from the client or the remote host cause the
+forwarded connection to be closed by the relay as well.
+Closing the primary control connection may close all currently
+forwarded connections of this client.
 
 
 # Commentary
 
-The assumption for the "receive incoming" part to work is that
-* It suffices to identify (ahem) clients by their public IP address.
-* Although multiple clients may share the same IP, we hope that
-  - Each client likely uses a different control port (or relay).
-  - Even if a second client on that public IP and relay tries an
-    already-used control port, the probability is low that a new
-    remote station comes in at that very moment. Thus, the second
-    client's connection will be dropped instantly.
-(If this becomes a problem, we can try to enforce collision-free port
+Requiring a primary and (possibly multiple) secondary connection(s)
+from a client is motivated by previous experience with other schemes.
+* TCPRelayAffix used an elaborate application-layer scheme to signal
+  new incoming messages on the (single) control connection. This
+  required constant and frequent polling, so as to not miss an
+  incoming connection with short timeout. Also, setting up what
+  I call the "secondary" connection now isn't always guaranteed
+  to succeed in time, so this was a big race.
+* The previous implementation of this TCP relay also used a single
+  control connection, and turned calls to the relayed socket's
+  `getconnection` method into new connections to the control port.
+  If no new remote host connection was available, the relay just
+  closed the new secondary connection.  This exhausts available
+  ports quickly, as the operating system's network stack keeps state
+  for closed sockets around for a while.
+* Therefore, we set up a primary control connection and prepare a
+  secondary connection right away, and require a new secondary
+  connection to be set up as soon as the first one is used.
+
+To demultiplex different clients from the same public IP, we hope that
+* Each client likely uses a different control port (or relay).
+* Even if a second client on that public IP and relay tries an
+  already-used control port, the probability is low that this
+  happens exactly between an existing secondary connection getting
+  used newly, and a new secondary getting set up.
+* The relay should probably drop an unexpected additional secondary
+  connection from a seemingly-known client.
+(If collisions become a problem, we can try to enforce collision-free port
 usage by clients on the same public IP, or add application-layer tokens.)
 
+Notes about port usage:
 Clients that share a pubic IP must use different control ports on
 the same relay. However, clients from different public IPs may share
 the control port. This may skew the proportion of control to relayed
