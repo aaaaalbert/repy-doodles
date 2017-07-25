@@ -134,17 +134,18 @@ def relayedlisten(relayip, relayport, localip, localport):
 class RelayedTCPListenSocket():
   """Implement a socket-like class that behaves mostly like a RepyV2
   TCPServerSocket. Behind the scenes, contact the TCP relay given at
-  instantion time, use the control connection to pick up new incoming
-  connections from remote stations, and return these connections as
-  Repy TCP sockets when `getconnection` is called.
+  instantion time, and handle primary and secondary control connections
+  as required to return sockets connecting to remote hosts when
+  `getconnection` is called.
   """
-  control_socket = None
-
   def __init__(self, relayip, relayport, localip, localport):
+    """Initialize our control connections to the TCP relay."""
     self.relayip = relayip
     self.relayport = relayport
     self.localip = localip
     self.control_socket = openconnection(relayip, relayport, localip, localport, 5)
+    self.secondary_connection = None
+
     started = getruntime()
     while getruntime()-started < 5:
       try:
@@ -159,17 +160,15 @@ class RelayedTCPListenSocket():
       self.close()
       raise TCPServerSocketInvalidError("Did not receive a relayed port.")
 
-  def close(self):
-    self.control_socket.close()
+    self.secondary_connection = self._get_new_secondary_control_connection()
 
-  def getconnection(self):
-    # Connect to the relay and return a socket for a new incoming
-    # connection from a remote host, or raise if there was none.
+
+  def _get_new_secondary_control_connection(self):
+    """Helper function to set up a new secondary control connection."""
     for source_port in list(getresources()[0]["connport"]):
       try:
-        relayed_socket = openconnection(self.relayip, self.relayport,
-            self.localip, source_port, 5)
-        break
+        return openconnection(self.relayip, self.relayport, self.localip,
+            source_port, 5)
       except (AlreadyListeningError, DuplicateTupleError, RepyArgumentError, TimeoutError, CleanupInProgressError):
         # Retry using a different port
         continue
@@ -178,32 +177,37 @@ class RelayedTCPListenSocket():
         raise TCPServerSocketInvalidError("No connection to relay " +
             self.relayip + " port " + str(self.relayport) + ", error '" +
             repr(e) + "'.")
+    else:
+      raise TCPServerSocketInvalidError("No free source ports for secondary control connection to TCP relay" +  self.relayip + " port " + str(self.relayport))
 
-    # See if the relayed socket is still open.
-    for i in range(10):
-      try:
-        relayed_socket.send("")
-        break
-      except SocketWouldBlockError:
-        # We couldn't yet send.
-        # XXX I'm not sure if this means that the connection is set up
-        # XXX and usable from the API's point of view, so let's retry.
-        # XXX (I'm really waiting for a SocketClosed... to be sure.)
-        sleep(0.1)
-      except (SocketClosedRemote, SocketClosedLocal):
-        # If the relayed socket has been closed, there is no new
-        # remote station connecting in to us.
-        raise SocketWouldBlockError
 
-    # Looks like we have a new remote station connecting in.
-    # The control socket tells us who this is.
+  def close(self):
+    """Stop relayed listening using this control connection."""
+    self.control_socket.close()
+
+
+  def getconnection(self):
+    """Receive information about an incoming remote host connection (if
+    any) from the primary control connection. Set up a new secondary
+    control connection in preparation for the next incoming host. Return
+    the current remote host's address and port, and the current secondary
+    connection as a socket.
+    """
     try:
       who_is_it = self.control_socket.recv(100)
-    except (SocketClosedRemote, InternetConnectivityError), e:
+    except SocketWouldBlockError:
+      # No new relayed connection!
+      raise
+    except (SocketClosedRemote, SocketClosedLocal), e:
+      # If the control socket has been closed, we can't use the relay anymore.
       raise TCPServerSocketInvalidError("Lost connection to the TCP relay, " +
           "error '" + repr(e) + "'.")
-
-    remote_ip, remote_port = who_is_it[len(NEW_REMOTE_STATION):-1].split()
+    else:
+      remote_ip, remote_port = who_is_it[len(NEW_REMOTE_STATION):-1].split()
+      # Use the current secondary connection for this relayed remote host,
+      # and provide a new secondary for the next incoming connection.
+      relayed_socket = self.secondary_connection
+      self.secondary_connection = self._get_new_secondary_control_connection()
     return remote_ip, remote_port, relayed_socket
 
 
