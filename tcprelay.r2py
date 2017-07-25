@@ -351,6 +351,9 @@ def run_server():
           client_socket.send(YOUR_RELAYED_PORT_IS + str(relay_port) + "\n")
         except (AlreadyListeningError, SocketWouldBlockError):
           continue
+        except (SocketClosedRemote), e:
+          log("Error notifying", client_id, "about relay port", relay_port,
+              repr(e), "\n")
         else:
           # Only if this worked out, commit this new client to the
           # relevant interal data structures.
@@ -425,15 +428,27 @@ def run_server():
 
 
     for client_id, remotes_list in connections["relay_new"].items():
-      for remote_ip, remote_port, remote_socket in remotes_list:
-        # Store the client socket, remote side details, two empty buffers,
-        # and a liveliness flag for the actual forwarding.
-        client_socket = connections["control_full"][client_id][3]
-        connections["relay_active"][client_id].append((client_socket,
-            remote_ip, remote_port, remote_socket, "", "", True))
-        client_socket.send(NEW_REMOTE_STATION +
-            remote_ip + " " + str(remote_port) + "\n")
+      if len(remotes_list)>0:
+        remote_ip, remote_port, remote_socket = remotes_list.pop(0)
+        control_socket, _, _, client_socket = connections["control_full"][client_id]
+        try:
+          control_socket.send(NEW_REMOTE_STATION +
+              remote_ip + " " + str(remote_port) + "\n")
+        except (SocketClosedRemote, SocketClosedLocal), e:
+          log("Error notifying", client_id, "about new remote", remote_ip,
+              remote_port, repr(e), "\n")
+          # XXX Remove this client!
+        else:
+          # Store the client socket, remote side details, two empty buffers,
+          # and a liveliness flag for the actual forwarding.
+          connections["relay_active"][client_id].append((client_socket,
+              remote_ip, remote_port, remote_socket, "", "", True))
+          # We have used up the client's prepared secondary connection.
+          # Demote the client to "partial" state again.
+          connections["control_partial"][client_id] = control_socket
+          del connections["control_full"][client_id]
 
+    # Forward all active connections
     for client_id, details_list in connections["relay_active"].items():
       (client_ip, client_port) = client_id
       new_details_list = []
