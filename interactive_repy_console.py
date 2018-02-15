@@ -1,5 +1,5 @@
 """
-interactive_repy.py --- an interactive RepyV2 console
+interactive_repy_console.py --- an interactive RepyV2 console
 
 Useful if you are tired of typing "from repyportability..." and 
 "add_dy_support..." into an interactive Python prompt over and over again.
@@ -13,6 +13,8 @@ Thank you for the helpful hints:
 
 """
 
+REPY_API_HELP_URL = "https://github.com/SeattleTestbed/docs/blob/master/Programming/RepyV2API.md"
+
 # This gives us the interactive prompt
 import code
 
@@ -20,7 +22,7 @@ import code
 import webbrowser
 
 def repy_api_help():
-  webbrowser.open("https://seattle.poly.edu/wiki/RepyV2API")
+  webbrowser.open(REPY_API_HELP_URL)
 
 # These make the Repy API and dy_import_module* functions available 
 # on the interactive prompt
@@ -31,9 +33,10 @@ add_dy_support(locals())
 code.interact(local=locals(), banner="""
 Welcome to the Interactive RepyV2 console!
 
-Type ``repy_api_help()'' to open the Repy API documentation at 
-https://seattle.poly.edu/wiki/RepyV2API in a browser window, and 
-visit https://github.com/SeattleTestbed for the latest code updates.
+Type ``repy_api_help()'' to open the Repy API documentation at
+""" + REPY_API_HELP_URL + """
+in a browser window, and visit https://github.com/SeattleTestbed
+for the latest code updates.
 """)
 
 # Once they are done, ...
